@@ -1,0 +1,167 @@
+name: 🧸 Companion engine release
+# Builds the patched editor for desktop-companion and publishes it as a
+# GitHub Release, with a SHA256SUMS file. Its install.sh downloads these.
+#
+# Release: push a tag named companion-<godot version>-<n>, e.g.
+#   git tag companion-4.7.2-1 && git push origin companion-4.7.2-1
+# then, in desktop-companion: tools/update-lock.sh godot companion-4.7.2-1
+#
+# Running it by hand (Actions tab) just builds, leaving the files as artifacts.
+on:
+  push:
+    tags: ["companion-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  SCONS_FLAGS: production=yes module_text_server_fb_enabled=yes
+
+jobs:
+  build-linux:
+    name: Linux editor
+    # The oldest supported runner, so the binary runs on older glibc too.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Setup dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install libwayland-bin
+
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: companion-linux-editor
+
+      - uses: ./.github/actions/godot-deps
+
+      - name: Download pre-built AccessKit
+        id: accesskit-sdk
+        shell: sh
+        run: |
+          if python ./misc/scripts/install_accesskit.py; then
+            echo "ACCESSKIT_ENABLED=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "ACCESSKIT_ENABLED=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: ${{ env.SCONS_FLAGS }} accesskit=${{ steps.accesskit-sdk.outputs.ACCESSKIT_ENABLED }}
+
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: companion-linux-editor
+
+      - name: Package
+        run: |
+          mkdir -p package out
+          cp bin/godot.linuxbsd.editor.x86_64 package/godot
+          strip package/godot
+          tar -C package -cJf out/godot-companion-linux-x86_64-editor.tar.xz godot
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-editor
+          path: out/*
+
+  build-windows:
+    name: Windows editor
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: companion-windows-editor
+
+      - uses: ./.github/actions/godot-deps
+
+      - name: Download Direct3D 12 SDK components
+        id: d3d12-sdk
+        shell: sh
+        run: |
+          if python ./misc/scripts/install_d3d12_sdk_windows.py; then
+            echo "D3D12_ENABLED=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "D3D12_ENABLED=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download pre-built ANGLE static libraries
+        id: angle-sdk
+        shell: sh
+        run: |
+          if python ./misc/scripts/install_angle.py; then
+            echo "ANGLE_ENABLED=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "ANGLE_ENABLED=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download pre-built AccessKit
+        id: accesskit-sdk
+        shell: sh
+        run: |
+          if python ./misc/scripts/install_accesskit.py; then
+            echo "ACCESSKIT_ENABLED=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "ACCESSKIT_ENABLED=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: windows
+          target: editor
+          scons-flags: >-
+            ${{ env.SCONS_FLAGS }}
+            d3d12=${{ steps.d3d12-sdk.outputs.D3D12_ENABLED }}
+            angle=${{ steps.angle-sdk.outputs.ANGLE_ENABLED }}
+            accesskit=${{ steps.accesskit-sdk.outputs.ACCESSKIT_ENABLED }}
+
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: companion-windows-editor
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package, out | Out-Null
+          Copy-Item bin/godot.windows.editor.x86_64.exe package/godot.exe
+          Copy-Item bin/godot.windows.editor.x86_64.console.exe package/godot.console.exe
+          Compress-Archive -Path package/* -DestinationPath out/godot-companion-windows-x86_64-editor.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-editor
+          path: out/*
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/companion-')
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: out
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Companion engine $GITHUB_REF_NAME" \
+            --notes "Godot ${GITHUB_REF_NAME#companion-} with desktop-companion's patches (Wayland input regions and layer-shell), built from $GITHUB_SHA."

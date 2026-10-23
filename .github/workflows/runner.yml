@@ -1,5 +1,8 @@
 name: 🔗 GHA
-on: [push, pull_request, merge_group, workflow_dispatch]
+# desktop-companion fork: not on push, so tags and branch pushes don't start
+# the whole upstream CI (companion_release.yml builds releases). Run it by hand
+# from the Actions tab when needed.
+on: [pull_request, workflow_dispatch]
 
 concurrency:
   group: ${{ github.workflow }}|${{ github.ref_name }}
