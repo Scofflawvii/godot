@@ -960,6 +960,7 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 		window_set_mode(setup_mode, wd.id);
 
 		wayland_thread.window_set_title(p_window_id, wd.title);
+		wayland_thread.window_set_mouse_passthrough(p_window_id, wd.mouse_passthrough);
 	}
 }
 
@@ -1076,8 +1077,17 @@ void DisplayServerWayland::window_set_title(const String &p_title, DisplayServer
 }
 
 void DisplayServerWayland::window_set_mouse_passthrough(const Vector<Vector2> &p_region, DisplayServerEnums::WindowID p_window_id) {
-	// TODO
-	DEBUG_LOG_WAYLAND(vformat("wayland stub window_set_mouse_passthrough region %s", p_region));
+	MutexLock mutex_lock(wayland_thread.mutex);
+
+	ERR_FAIL_COND(!windows.has(p_window_id));
+
+	WindowData &wd = windows[p_window_id];
+
+	wd.mouse_passthrough = p_region;
+
+	if (wd.created) {
+		wayland_thread.window_set_mouse_passthrough(p_window_id, wd.mouse_passthrough);
+	}
 }
 
 void DisplayServerWayland::window_set_rect_changed_callback(const Callable &p_callable, DisplayServerEnums::WindowID p_window_id) {

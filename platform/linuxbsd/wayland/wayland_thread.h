@@ -346,6 +346,10 @@ public:
 
 		String exported_handle;
 
+		// Mouse passthrough polygon in Godot's (scaled) window coordinates. Empty
+		// means the whole surface takes input.
+		Vector<Vector2> mouse_passthrough;
+
 		// Currently applied buffer scale.
 		int buffer_scale = 1;
 
@@ -1275,6 +1279,8 @@ public:
 
 	static Vector2i scale_vector2i(const Vector2i &p_vector, double p_amount);
 
+	static void window_state_update_input_region(WindowState *p_ws);
+
 	void push_message(Ref<Message> message);
 	bool has_message();
 	Ref<Message> pop_message();
@@ -1310,6 +1316,7 @@ public:
 
 	void window_set_borderless(DisplayServerEnums::WindowID p_window_id, bool p_borderless);
 	void window_set_title(DisplayServerEnums::WindowID p_window_id, const String &p_title);
+	void window_set_mouse_passthrough(DisplayServerEnums::WindowID p_window_id, const Vector<Vector2> &p_region);
 	void window_set_app_id(DisplayServerEnums::WindowID p_window_id, const String &p_app_id);
 
 	bool window_is_focused(DisplayServerEnums::WindowID p_window_id);

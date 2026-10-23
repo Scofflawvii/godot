@@ -4101,6 +4101,9 @@ void WaylandThread::window_state_update_size(WindowState *p_ws, int p_width, int
 	}
 
 	if (scale_changed) {
+		// The input region is in surface-local coordinates.
+		window_state_update_input_region(p_ws);
+
 		Ref<WindowEventMessage> dpi_msg;
 		dpi_msg.instantiate();
 		dpi_msg->id = p_ws->id;
@@ -4123,6 +4126,75 @@ void WaylandThread::window_state_set_buffer_scale(WindowState *p_ws, int p_buffe
 
 // Scales a vector according to wp_fractional_scale's rules, where coordinates
 // must be scaled with away from zero half-rounding.
+// Sets the surface's input region to the mouse passthrough polygon. Regions
+// are made of rectangles, so the polygon is covered with horizontal bands of
+// spans, one surface-local unit tall, merging identical neighbouring bands.
+void WaylandThread::window_state_update_input_region(WindowState *p_ws) {
+	ERR_FAIL_NULL(p_ws);
+
+	if (!p_ws->wl_surface) {
+		return;
+	}
+
+	if (p_ws->mouse_passthrough.size() < 3) {
+		// A null region means the whole surface takes input.
+		wl_surface_set_input_region(p_ws->wl_surface, nullptr);
+		return;
+	}
+
+	double scale = window_state_get_scale_factor(p_ws);
+
+	Vector<Vector2> polygon;
+	polygon.resize(p_ws->mouse_passthrough.size());
+	Rect2 bounds(p_ws->mouse_passthrough[0] / scale, Size2());
+	for (int i = 0; i < polygon.size(); i++) {
+		polygon.write[i] = p_ws->mouse_passthrough[i] / scale;
+		bounds.expand_to(polygon[i]);
+	}
+
+	struct wl_region *region = wl_compositor_create_region(p_ws->registry->wl_compositor);
+
+	Vector<Vector2i> band;
+	int band_start = 0;
+	int end_y = (int)Math::ceil(bounds.get_end().y);
+
+	for (int y = (int)Math::floor(bounds.position.y); y <= end_y; y++) {
+		Vector<Vector2i> spans;
+
+		if (y < end_y) {
+			// Even-odd crossings of the row's centre line.
+			double center = y + 0.5;
+			LocalVector<double> crossings;
+			for (int i = 0; i < polygon.size(); i++) {
+				const Vector2 &a = polygon[i];
+				const Vector2 &b = polygon[(i + 1) % polygon.size()];
+				if ((a.y <= center) != (b.y <= center)) {
+					crossings.push_back(a.x + (center - a.y) * (b.x - a.x) / (b.y - a.y));
+				}
+			}
+			crossings.sort();
+			for (uint32_t i = 0; i + 1 < crossings.size(); i += 2) {
+				int from = (int)Math::floor(crossings[i]);
+				int to = (int)Math::ceil(crossings[i + 1]);
+				if (to > from) {
+					spans.push_back(Vector2i(from, to));
+				}
+			}
+		}
+
+		if (spans != band) {
+			for (const Vector2i &span : band) {
+				wl_region_add(region, span.x, band_start, span.y - span.x, y - band_start);
+			}
+			band = spans;
+			band_start = y;
+		}
+	}
+
+	wl_surface_set_input_region(p_ws->wl_surface, region);
+	wl_region_destroy(region);
+}
+
 Vector2i WaylandThread::scale_vector2i(const Vector2i &p_vector, double p_amount) {
 	// This snippet is tiny, I know, but this is done a lot.
 	int x = std::round(p_vector.x * p_amount);
@@ -5047,6 +5119,14 @@ void WaylandThread::window_set_title(DisplayServerEnums::WindowID p_window_id, c
 	if (ws.xdg_toplevel) {
 		xdg_toplevel_set_title(ws.xdg_toplevel, p_title.utf8().get_data());
 	}
+}
+
+void WaylandThread::window_set_mouse_passthrough(DisplayServerEnums::WindowID p_window_id, const Vector<Vector2> &p_region) {
+	ERR_FAIL_COND(!windows.has(p_window_id));
+	WindowState &ws = windows[p_window_id];
+
+	ws.mouse_passthrough = p_region;
+	window_state_update_input_region(&ws);
 }
 
 void WaylandThread::window_set_app_id(DisplayServerEnums::WindowID p_window_id, const String &p_app_id) {

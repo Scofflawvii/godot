@@ -107,6 +107,7 @@ class DisplayServerWayland : public DisplayServer {
 		Callable input_text_callback;
 
 		String title;
+		Vector<Vector2> mouse_passthrough;
 		ObjectID instance_id;
 	};
 
