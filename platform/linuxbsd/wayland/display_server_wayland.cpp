@@ -871,7 +871,14 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 			wd.rect.position = Point2i();
 
 			DEBUG_LOG_WAYLAND(vformat("Creating regular window of size %s", wd.rect.size));
-			wayland_thread.window_create(p_window_id, wd.rect.size, wd.parent_id);
+			// Optionally put the main window on a layer-shell layer (overlays,
+			// desktop widgets), where the compositor supports it.
+			int layer = -1;
+			if (p_window_id == DisplayServerEnums::MAIN_WINDOW_ID && wayland_thread.supports_layer_shell()) {
+				layer = int(GLOBAL_GET("display/window/wayland/layer_shell")) - 1;
+			}
+
+			wayland_thread.window_create(p_window_id, wd.rect.size, wd.parent_id, layer, _get_app_id_from_context(context));
 			wayland_thread.window_set_min_size(p_window_id, wd.min_size);
 			wayland_thread.window_set_max_size(p_window_id, wd.max_size);
 			wayland_thread.window_set_app_id(p_window_id, _get_app_id_from_context(context));
@@ -2304,6 +2311,14 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Dis
 	if (thread_err != OK) {
 		r_error = thread_err;
 		ERR_FAIL_MSG("Could not initialize the Wayland thread.");
+	}
+
+	if (int(GLOBAL_GET("display/window/wayland/layer_shell")) > 0 && !wayland_thread.supports_layer_shell()) {
+		// The project wants to be an overlay or desktop widget, which a regular
+		// Wayland window can't be. Let another driver (X11) take over.
+		r_error = ERR_UNAVAILABLE;
+		WARN_PRINT("The compositor doesn't support wlr-layer-shell, which this project needs on Wayland.");
+		return;
 	}
 
 	// Input.

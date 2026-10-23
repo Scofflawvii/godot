@@ -71,6 +71,7 @@
 #include "wayland/protocol/viewporter.gen.h"
 #include "wayland/protocol/wayland.gen.h"
 #include "wayland/protocol/xdg_activation.gen.h"
+#include "wayland/protocol/wlr_layer_shell.gen.h"
 #include "wayland/protocol/xdg_decoration.gen.h"
 #include "wayland/protocol/xdg_foreign_v2.gen.h"
 #include "wayland/protocol/xdg_shell.gen.h"
@@ -253,6 +254,9 @@ public:
 		struct xdg_activation_v1 *xdg_activation = nullptr;
 		uint32_t xdg_activation_name = 0;
 
+		struct zwlr_layer_shell_v1 *wlr_layer_shell = nullptr;
+		uint32_t wlr_layer_shell_name = 0;
+
 		struct zwp_primary_selection_device_manager_v1 *wp_primary_selection_device_manager = nullptr;
 		uint32_t wp_primary_selection_device_manager_name = 0;
 
@@ -343,6 +347,9 @@ public:
 		struct zxdg_exported_v2 *xdg_exported_v2 = nullptr;
 
 		struct xdg_popup *xdg_popup = nullptr;
+
+		// Replaces the xdg_toplevel when the window lives on a layer-shell layer.
+		struct zwlr_layer_surface_v1 *wlr_layer_surface = nullptr;
 
 		String exported_handle;
 
@@ -915,6 +922,9 @@ private:
 
 	static void _xdg_exported_v2_on_handle(void *data, zxdg_exported_v2 *exported, const char *handle);
 
+	static void _wlr_layer_surface_on_configure(void *data, struct zwlr_layer_surface_v1 *wlr_layer_surface, uint32_t serial, uint32_t width, uint32_t height);
+	static void _wlr_layer_surface_on_closed(void *data, struct zwlr_layer_surface_v1 *wlr_layer_surface);
+
 	static void _xdg_activation_token_on_done(void *data, struct xdg_activation_token_v1 *xdg_activation_token, const char *token);
 
 	static void _godot_embedding_compositor_on_client(void *data, struct godot_embedding_compositor *godot_embedding_compositor, struct godot_embedded_client *godot_embedded_client, int32_t pid);
@@ -1155,6 +1165,11 @@ private:
 		.configure = _xdg_toplevel_decoration_on_configure,
 	};
 
+	static constexpr struct zwlr_layer_surface_v1_listener wlr_layer_surface_listener = {
+		.configure = _wlr_layer_surface_on_configure,
+		.closed = _wlr_layer_surface_on_closed,
+	};
+
 	static constexpr struct xdg_activation_token_v1_listener xdg_activation_token_listener = {
 		.done = _xdg_activation_token_on_done,
 	};
@@ -1281,6 +1296,8 @@ public:
 
 	static void window_state_update_input_region(WindowState *p_ws);
 
+	bool supports_layer_shell() const;
+
 	void push_message(Ref<Message> message);
 	bool has_message();
 	Ref<Message> pop_message();
@@ -1290,7 +1307,7 @@ public:
 	void set_icon(const Ref<Image> &p_icon, DisplayServerEnums::WindowID p_window_id);
 	void set_default_icon(const Ref<Image> &p_icon);
 
-	void window_create(DisplayServerEnums::WindowID p_window_id, const Size2i &p_size, DisplayServerEnums::WindowID p_parent_id = DisplayServerEnums::INVALID_WINDOW_ID);
+	void window_create(DisplayServerEnums::WindowID p_window_id, const Size2i &p_size, DisplayServerEnums::WindowID p_parent_id = DisplayServerEnums::INVALID_WINDOW_ID, int p_layer = -1, const String &p_layer_namespace = String());
 	void window_create_popup(DisplayServerEnums::WindowID p_window_id, DisplayServerEnums::WindowID p_parent_id, Rect2i p_rect);
 	void window_destroy(DisplayServerEnums::WindowID p_window_Id);
 

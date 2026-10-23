@@ -1731,6 +1731,8 @@ ProjectSettings::ProjectSettings() {
 	GLOBAL_DEF_BASIC("display/window/size/borderless", false);
 	GLOBAL_DEF("display/window/size/always_on_top", false);
 	GLOBAL_DEF("display/window/size/transparent", false);
+	// Keep in sync with `zwlr_layer_shell_v1_layer` (plus one).
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "display/window/wayland/layer_shell", PROPERTY_HINT_ENUM, "Disabled,Background,Bottom,Top,Overlay"), 0);
 	GLOBAL_DEF("display/window/size/extend_to_title", false);
 	GLOBAL_DEF("display/window/size/no_focus", false);
 	GLOBAL_DEF("display/window/size/sharp_corners", false);

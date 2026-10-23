@@ -717,6 +717,13 @@ void WaylandThread::_wl_registry_on_global(void *data, struct wl_registry *wl_re
 		return;
 	}
 
+	if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
+		// Version 4 adds on-demand keyboard focus.
+		registry->wlr_layer_shell = (struct zwlr_layer_shell_v1 *)wl_registry_bind(wl_registry, name, &zwlr_layer_shell_v1_interface, CLAMP((int)version, 1, 4));
+		registry->wlr_layer_shell_name = name;
+		return;
+	}
+
 	if (strcmp(interface, xdg_activation_v1_interface.name) == 0) {
 		registry->xdg_activation = (struct xdg_activation_v1 *)wl_registry_bind(wl_registry, name, &xdg_activation_v1_interface, 1);
 		registry->xdg_activation_name = name;
@@ -1019,6 +1026,17 @@ void WaylandThread::_wl_registry_on_global_remove(void *data, struct wl_registry
 		}
 
 		registry->xdg_toplevel_icon_manager_name = 0;
+
+		return;
+	}
+
+	if (name == registry->wlr_layer_shell_name) {
+		if (registry->wlr_layer_shell) {
+			zwlr_layer_shell_v1_destroy(registry->wlr_layer_shell);
+			registry->wlr_layer_shell = nullptr;
+		}
+
+		registry->wlr_layer_shell_name = 0;
 
 		return;
 	}
@@ -3706,6 +3724,32 @@ void WaylandThread::_wp_text_input_on_done(void *data, struct zwp_text_input_v3 
 	ss->ime_cursor = Vector2i();
 }
 
+void WaylandThread::_wlr_layer_surface_on_configure(void *data, struct zwlr_layer_surface_v1 *wlr_layer_surface, uint32_t serial, uint32_t width, uint32_t height) {
+	zwlr_layer_surface_v1_ack_configure(wlr_layer_surface, serial);
+
+	WindowState *ws = (WindowState *)data;
+	ERR_FAIL_NULL(ws);
+
+	// Zero means we get to pick, so keep our size.
+	window_state_update_size(ws, width ? (int)width : ws->rect.size.width, height ? (int)height : ws->rect.size.height);
+
+	ws->ready = true;
+
+	DEBUG_LOG_WAYLAND_THREAD(vformat("wlr layer surface on configure width %d height %d.", width, height));
+}
+
+void WaylandThread::_wlr_layer_surface_on_closed(void *data, struct zwlr_layer_surface_v1 *wlr_layer_surface) {
+	WindowState *ws = (WindowState *)data;
+	ERR_FAIL_NULL(ws);
+
+	// The compositor took the layer away (e.g. its output was unplugged).
+	Ref<WindowEventMessage> msg;
+	msg.instantiate();
+	msg->id = ws->id;
+	msg->event = DisplayServerEnums::WINDOW_EVENT_CLOSE_REQUEST;
+	ws->wayland_thread->push_message(msg);
+}
+
 void WaylandThread::_xdg_activation_token_on_done(void *data, struct xdg_activation_token_v1 *xdg_activation_token, const char *token) {
 	WindowState *ws = (WindowState *)data;
 	ERR_FAIL_NULL(ws);
@@ -4416,7 +4460,7 @@ Ref<WaylandThread::Message> WaylandThread::pop_message() {
 	return Ref<Message>();
 }
 
-void WaylandThread::window_create(DisplayServerEnums::WindowID p_window_id, const Size2i &p_size, DisplayServerEnums::WindowID p_parent_id) {
+void WaylandThread::window_create(DisplayServerEnums::WindowID p_window_id, const Size2i &p_size, DisplayServerEnums::WindowID p_parent_id, int p_layer, const String &p_layer_namespace) {
 	ERR_FAIL_COND(windows.has(p_window_id));
 	WindowState &ws = windows[p_window_id];
 
@@ -4453,6 +4497,25 @@ void WaylandThread::window_create(DisplayServerEnums::WindowID p_window_id, cons
 
 	bool decorated = false;
 
+	if (p_layer >= 0 && registry.wlr_layer_shell) {
+		// A layer-shell surface instead of a regular window: the compositor stacks
+		// it on its layer and stretches it over the whole output (minus panels'
+		// exclusive zones), and never tiles or decorates it.
+		ws.wlr_layer_surface = zwlr_layer_shell_v1_get_layer_surface(registry.wlr_layer_shell, ws.wl_surface, nullptr, p_layer, p_layer_namespace.utf8().get_data());
+		zwlr_layer_surface_v1_add_listener(ws.wlr_layer_surface, &wlr_layer_surface_listener, &ws);
+
+		zwlr_layer_surface_v1_set_anchor(ws.wlr_layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
+		zwlr_layer_surface_v1_set_size(ws.wlr_layer_surface, 0, 0);
+		zwlr_layer_surface_v1_set_exclusive_zone(ws.wlr_layer_surface, 0);
+
+		// Take the keyboard only when clicked, never exclusively.
+		if (zwlr_layer_shell_v1_get_version(registry.wlr_layer_shell) >= ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND_SINCE_VERSION) {
+			zwlr_layer_surface_v1_set_keyboard_interactivity(ws.wlr_layer_surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);
+		}
+
+		decorated = true;
+	}
+
 #ifdef LIBDECOR_ENABLED
 	if (!decorated && libdecor_context) {
 		ws.libdecor_frame = libdecor_decorate(libdecor_context, ws.wl_surface, (struct libdecor_frame_interface *)&libdecor_frame_interface, &ws);
@@ -4469,7 +4532,7 @@ void WaylandThread::window_create(DisplayServerEnums::WindowID p_window_id, cons
 	}
 #endif
 
-	if (!decorated) {
+	if (!decorated && !ws.wlr_layer_surface) {
 		// libdecor has failed loading or is disabled, we shall handle xdg_toplevel
 		// creation and decoration ourselves (and by decorating for now I just mean
 		// asking for SSDs and hoping for the best).
@@ -4501,7 +4564,9 @@ void WaylandThread::window_create(DisplayServerEnums::WindowID p_window_id, cons
 	ws.frame_callback = wl_surface_frame(ws.wl_surface);
 	wl_callback_add_listener(ws.frame_callback, &frame_wl_callback_listener, &ws);
 
-	if (registry.xdg_exporter_v2) {
+	if (ws.wlr_layer_surface) {
+		// Only toplevels can be exported (e.g. to parent portal dialogs).
+	} else if (registry.xdg_exporter_v2) {
 		ws.xdg_exported_v2 = zxdg_exporter_v2_export_toplevel(registry.xdg_exporter_v2, ws.wl_surface);
 		zxdg_exported_v2_add_listener(ws.xdg_exported_v2, &xdg_exported_v2_listener, &ws);
 	} else if (registry.xdg_exporter_v1) {
@@ -4611,6 +4676,10 @@ void WaylandThread::window_destroy(DisplayServerEnums::WindowID p_window_id) {
 		xdg_toplevel_destroy(ws.xdg_toplevel);
 	}
 
+	if (ws.wlr_layer_surface) {
+		zwlr_layer_surface_v1_destroy(ws.wlr_layer_surface);
+	}
+
 #ifdef LIBDECOR_ENABLED
 	if (ws.libdecor_frame) {
 		libdecor_frame_unref(ws.libdecor_frame);
@@ -4697,6 +4766,11 @@ Size2i WaylandThread::window_set_size(DisplayServerEnums::WindowID p_window_id, 
 
 	if (ws.maximized) {
 		// Can't do anything.
+		return scale_vector2i(ws.rect.size, window_scale);
+	}
+
+	if (ws.wlr_layer_surface) {
+		// Anchored to every edge: the compositor decides the size.
 		return scale_vector2i(ws.rect.size, window_scale);
 	}
 
@@ -5119,6 +5193,10 @@ void WaylandThread::window_set_title(DisplayServerEnums::WindowID p_window_id, c
 	if (ws.xdg_toplevel) {
 		xdg_toplevel_set_title(ws.xdg_toplevel, p_title.utf8().get_data());
 	}
+}
+
+bool WaylandThread::supports_layer_shell() const {
+	return registry.wlr_layer_shell != nullptr;
 }
 
 void WaylandThread::window_set_mouse_passthrough(DisplayServerEnums::WindowID p_window_id, const Vector<Vector2> &p_region) {
