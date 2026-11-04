@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GlobalShortcuts" inherits="Object" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		System-wide keyboard shortcuts, registered with the desktop.
+	</brief_description>
+	<description>
+		Asks the desktop for keyboard shortcuts that work while other windows have focus. On Linux this uses the XDG desktop portal's GlobalShortcuts interface (KDE Plasma, GNOME 48 and later, Hyprland and others): the desktop may ask the user to approve the suggested keys, and the user can change them in the desktop's settings. Some desktops (Hyprland) register the shortcuts without assigning keys; [member Dictionary] entries in [signal bound] then have an empty [code]trigger_description[/code]. Elsewhere [method is_supported] is [code]false[/code].
+		The session lasts until [method unbind_shortcuts] or the application quits.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="bind_shortcuts">
+			<return type="int" enum="Error" />
+			<param index="0" name="app_id" type="String" />
+			<param index="1" name="shortcuts" type="Dictionary[]" />
+			<description>
+				Registers shortcuts for [param app_id] (the application's [code].desktop[/code] file name without the extension). Each entry has an [code]id[/code], a [code]description[/code] and optionally a [code]preferred_trigger[/code] in the shortcuts specification's format, e.g. [code]"LOGO+SHIFT+c"[/code]. Replaces earlier bindings. The result arrives as [signal bound] or [signal failed].
+			</description>
+		</method>
+		<method name="get_bindings">
+			<return type="Dictionary[]" />
+			<description>
+				The shortcuts the desktop bound: [code]id[/code], [code]description[/code] and [code]trigger_description[/code] (the key the user would press, as the desktop describes it, or empty).
+			</description>
+		</method>
+		<method name="get_status">
+			<return type="String" />
+			<description>
+				[code]"unbound"[/code], [code]"binding"[/code], [code]"bound"[/code], or [code]"failed: "[/code] and a reason.
+			</description>
+		</method>
+		<method name="is_supported" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Whether the desktop offers global shortcuts. This asks the desktop portal, so call it once rather than every frame.
+			</description>
+		</method>
+		<method name="unbind_shortcuts">
+			<return type="void" />
+			<description>
+				Releases the shortcuts.
+			</description>
+		</method>
+	</methods>
+	<signals>
+		<signal name="activated">
+			<param index="0" name="id" type="String" />
+			<description>
+				The user pressed the shortcut [param id].
+			</description>
+		</signal>
+		<signal name="bound">
+			<param index="0" name="bindings" type="Dictionary[]" />
+			<description>
+				The desktop bound the shortcuts, or the user changed them. See [method get_bindings].
+			</description>
+		</signal>
+		<signal name="failed">
+			<param index="0" name="message" type="String" />
+			<description>
+				The shortcuts couldn't be bound (no portal, declined by the user...).
+			</description>
+		</signal>
+	</signals>
+</class>

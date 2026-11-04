@@ -5195,6 +5195,36 @@ void WaylandThread::window_set_title(DisplayServerEnums::WindowID p_window_id, c
 	}
 }
 
+// Layer shell offers no "focus me" request: on-demand layers only get the
+// keyboard when clicked. Exclusive interactivity makes the compositor give it
+// at once, but it must be held: compositors (Hyprland) refocus the previous
+// window as soon as a layer drops back to on demand. While it's held,
+// Hyprland also sends every click to the layer, so the app should release it
+// (window_set_layer_keyboard) when done, like a launcher closing.
+static bool _layer_keyboard_supported(zwlr_layer_shell_v1 *p_shell) {
+	return p_shell && zwlr_layer_shell_v1_get_version(p_shell) >= ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND_SINCE_VERSION;
+}
+
+bool WaylandThread::window_grab_layer_keyboard(DisplayServerEnums::WindowID p_window_id) {
+	WindowState *ws = window_get_state(p_window_id);
+	if (!ws || !ws->wlr_layer_surface || !_layer_keyboard_supported(registry.wlr_layer_shell)) {
+		return false;
+	}
+	zwlr_layer_surface_v1_set_keyboard_interactivity(ws->wlr_layer_surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
+	wl_surface_commit(ws->wl_surface);
+	return true;
+}
+
+bool WaylandThread::window_set_layer_keyboard(DisplayServerEnums::WindowID p_window_id, bool p_focusable) {
+	WindowState *ws = window_get_state(p_window_id);
+	if (!ws || !ws->wlr_layer_surface || !_layer_keyboard_supported(registry.wlr_layer_shell)) {
+		return false;
+	}
+	zwlr_layer_surface_v1_set_keyboard_interactivity(ws->wlr_layer_surface, p_focusable ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+	wl_surface_commit(ws->wl_surface);
+	return true;
+}
+
 bool WaylandThread::supports_layer_shell() const {
 	return registry.wlr_layer_shell != nullptr;
 }

@@ -1364,6 +1364,12 @@ void DisplayServerWayland::window_set_flag(DisplayServerEnums::WindowFlags p_fla
 			ERR_FAIL_COND_MSG(wd.created && (wd.flags & DisplayServerEnums::WINDOW_FLAG_POPUP_WM_HINT_BIT) != p_enabled, "Popup hint can't changed while window is opened.");
 		} break;
 
+		case DisplayServerEnums::WINDOW_FLAG_NO_FOCUS: {
+			// Layer surfaces: keyboard never, or on demand; either releases a
+			// window_move_to_foreground() grab.
+			wayland_thread.window_set_layer_keyboard(p_window_id, !p_enabled);
+		} break;
+
 		default: {
 		}
 	}
@@ -1391,7 +1397,11 @@ void DisplayServerWayland::window_request_attention(DisplayServerEnums::WindowID
 }
 
 void DisplayServerWayland::window_move_to_foreground(DisplayServerEnums::WindowID p_window_id) {
-	// Standard Wayland APIs don't support this.
+	// Standard Wayland APIs don't support this for windows. A layer-shell
+	// surface can at least take the keyboard (Window.grab_focus() lands here),
+	// until WINDOW_FLAG_NO_FOCUS is set again (to either value).
+	MutexLock mutex_lock(wayland_thread.mutex);
+	wayland_thread.window_grab_layer_keyboard(p_window_id);
 }
 
 bool DisplayServerWayland::window_is_focused(DisplayServerEnums::WindowID p_window_id) const {

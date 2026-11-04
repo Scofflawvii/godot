@@ -1,6 +1,8 @@
 name: 🧸 Companion engine release
-# Builds the patched editor for desktop-companion and publishes it as a
-# GitHub Release, with a SHA256SUMS file. Its install.sh downloads these.
+# Builds the patched editor for desktop-companion, and the release export
+# templates its tools/export.sh uses for builds without the editor, and
+# publishes them as a GitHub Release with a SHA256SUMS file. Its install.sh
+# downloads the editors.
 #
 # Release: push a tag named companion-<godot version>-<n>, e.g.
 #   git tag companion-4.7.2-1 && git push origin companion-4.7.2-1
@@ -55,6 +57,12 @@ jobs:
           target: editor
           scons-flags: ${{ env.SCONS_FLAGS }} accesskit=${{ steps.accesskit-sdk.outputs.ACCESSKIT_ENABLED }}
 
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: template_release
+          scons-flags: ${{ env.SCONS_FLAGS }} accesskit=${{ steps.accesskit-sdk.outputs.ACCESSKIT_ENABLED }}
+
       - uses: ./.github/actions/godot-cache-save
         with:
           cache-name: companion-linux-editor
@@ -65,6 +73,9 @@ jobs:
           cp bin/godot.linuxbsd.editor.x86_64 package/godot
           strip package/godot
           tar -C package -cJf out/godot-companion-linux-x86_64-editor.tar.xz godot
+          # tools/export.sh looks for it at engine/bin/ under this name.
+          cp bin/godot.linuxbsd.template_release.x86_64 out/godot.linuxbsd.template_release.x86_64
+          strip out/godot.linuxbsd.template_release.x86_64
 
       - uses: actions/upload-artifact@v4
         with:
@@ -125,6 +136,16 @@ jobs:
             angle=${{ steps.angle-sdk.outputs.ANGLE_ENABLED }}
             accesskit=${{ steps.accesskit-sdk.outputs.ACCESSKIT_ENABLED }}
 
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: windows
+          target: template_release
+          scons-flags: >-
+            ${{ env.SCONS_FLAGS }}
+            d3d12=${{ steps.d3d12-sdk.outputs.D3D12_ENABLED }}
+            angle=${{ steps.angle-sdk.outputs.ANGLE_ENABLED }}
+            accesskit=${{ steps.accesskit-sdk.outputs.ACCESSKIT_ENABLED }}
+
       - uses: ./.github/actions/godot-cache-save
         with:
           cache-name: companion-windows-editor
@@ -136,6 +157,7 @@ jobs:
           Copy-Item bin/godot.windows.editor.x86_64.exe package/godot.exe
           Copy-Item bin/godot.windows.editor.x86_64.console.exe package/godot.console.exe
           Compress-Archive -Path package/* -DestinationPath out/godot-companion-windows-x86_64-editor.zip
+          Copy-Item bin/godot.windows.template_release.x86_64.exe out/godot.windows.template_release.x86_64.exe
 
       - uses: actions/upload-artifact@v4
         with:
@@ -164,4 +186,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" out/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "Companion engine $GITHUB_REF_NAME" \
-            --notes "Godot ${GITHUB_REF_NAME#companion-} with desktop-companion's patches (Wayland input regions and layer-shell), built from $GITHUB_SHA."
+            --notes "Godot ${GITHUB_REF_NAME#companion-} with desktop-companion's patches (Wayland input regions and layer-shell), built from $GITHUB_SHA. Editors for install.sh; godot.*.template_release.* are the export templates for tools/export.sh (put them in engine/bin/)."

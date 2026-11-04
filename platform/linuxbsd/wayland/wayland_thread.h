@@ -1297,6 +1297,11 @@ public:
 	static void window_state_update_input_region(WindowState *p_ws);
 
 	bool supports_layer_shell() const;
+	// Layer surfaces: takes the keyboard (exclusive interactivity) until
+	// window_set_layer_keyboard() sets it back.
+	bool window_grab_layer_keyboard(DisplayServerEnums::WindowID p_window_id);
+	// Layer surfaces: keyboard on demand (when clicked), or never; releases a grab.
+	bool window_set_layer_keyboard(DisplayServerEnums::WindowID p_window_id, bool p_focusable);
 
 	void push_message(Ref<Message> message);
 	bool has_message();
