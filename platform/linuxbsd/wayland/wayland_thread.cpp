@@ -4460,7 +4460,7 @@ Ref<WaylandThread::Message> WaylandThread::pop_message() {
 	return Ref<Message>();
 }
 
-void WaylandThread::window_create(DisplayServerEnums::WindowID p_window_id, const Size2i &p_size, DisplayServerEnums::WindowID p_parent_id, int p_layer, const String &p_layer_namespace) {
+void WaylandThread::window_create(DisplayServerEnums::WindowID p_window_id, const Size2i &p_size, DisplayServerEnums::WindowID p_parent_id, int p_layer, const String &p_layer_namespace, int p_layer_screen) {
 	ERR_FAIL_COND(windows.has(p_window_id));
 	WindowState &ws = windows[p_window_id];
 
@@ -4501,7 +4501,13 @@ void WaylandThread::window_create(DisplayServerEnums::WindowID p_window_id, cons
 		// A layer-shell surface instead of a regular window: the compositor stacks
 		// it on its layer and stretches it over the whole output (minus panels'
 		// exclusive zones), and never tiles or decorates it.
-		ws.wlr_layer_surface = zwlr_layer_shell_v1_get_layer_surface(registry.wlr_layer_shell, ws.wl_surface, nullptr, p_layer, p_layer_namespace.utf8().get_data());
+		// On the requested output, or the compositor's choice (usually the
+		// focused one).
+		struct wl_output *output = nullptr;
+		if (p_layer_screen >= 0 && p_layer_screen < (int)registry.wl_outputs.size()) {
+			output = registry.wl_outputs.get(p_layer_screen);
+		}
+		ws.wlr_layer_surface = zwlr_layer_shell_v1_get_layer_surface(registry.wlr_layer_shell, ws.wl_surface, output, p_layer, p_layer_namespace.utf8().get_data());
 		zwlr_layer_surface_v1_add_listener(ws.wlr_layer_surface, &wlr_layer_surface_listener, &ws);
 
 		zwlr_layer_surface_v1_set_anchor(ws.wlr_layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
@@ -5496,6 +5502,23 @@ WaylandThread::ScreenData WaylandThread::screen_get_data(int p_screen) const {
 
 int WaylandThread::get_screen_count() const {
 	return registry.wl_outputs.size();
+}
+
+// The output the window is on (the first it entered, by screen index), or
+// -1 before it has entered any.
+int WaylandThread::window_get_screen(DisplayServerEnums::WindowID p_window_id) const {
+	const WindowState *ws = window_get_state(p_window_id);
+	if (!ws || ws->wl_outputs.is_empty()) {
+		return -1;
+	}
+	int index = 0;
+	for (struct wl_output *output : registry.wl_outputs) {
+		if (ws->wl_outputs.has(output)) {
+			return index;
+		}
+		index++;
+	}
+	return -1;
 }
 
 bool WaylandThread::input_has_touch() const {

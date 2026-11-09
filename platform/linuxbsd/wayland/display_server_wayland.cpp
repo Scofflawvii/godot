@@ -866,19 +866,35 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 		wd.root_id = root_id;
 
 		if (!window_get_flag(DisplayServerEnums::WINDOW_FLAG_POPUP_WM_HINT, p_window_id)) {
+			// Optionally put the main window on a layer-shell layer (overlays,
+			// desktop widgets), where the compositor supports it. With that on,
+			// borderless always-on-top toplevels are layer surfaces too (an
+			// overlay spanning several outputs: one window each), on the output
+			// containing their requested position.
+			int layer = -1;
+			int layer_screen = -1;
+			if (wayland_thread.supports_layer_shell()) {
+				int setting = int(GLOBAL_GET("display/window/wayland/layer_shell")) - 1;
+				if (p_window_id == DisplayServerEnums::MAIN_WINDOW_ID) {
+					layer = setting;
+				} else if (setting >= 0 && window_get_flag(DisplayServerEnums::WINDOW_FLAG_ALWAYS_ON_TOP, p_window_id) && window_get_flag(DisplayServerEnums::WINDOW_FLAG_BORDERLESS, p_window_id)) {
+					layer = setting;
+					for (int i = 0; i < wayland_thread.get_screen_count(); i++) {
+						WaylandThread::ScreenData screen = wayland_thread.screen_get_data(i);
+						if (Rect2i(screen.position, screen.size).has_point(wd.rect.position)) {
+							layer_screen = i;
+							break;
+						}
+					}
+				}
+			}
+
 			// NOTE: DO **NOT** KEEP THE POSITION SET FOR TOPLEVELS. Wayland does not
 			// track them and we're gonna get our events transformed in unexpected ways.
 			wd.rect.position = Point2i();
 
 			DEBUG_LOG_WAYLAND(vformat("Creating regular window of size %s", wd.rect.size));
-			// Optionally put the main window on a layer-shell layer (overlays,
-			// desktop widgets), where the compositor supports it.
-			int layer = -1;
-			if (p_window_id == DisplayServerEnums::MAIN_WINDOW_ID && wayland_thread.supports_layer_shell()) {
-				layer = int(GLOBAL_GET("display/window/wayland/layer_shell")) - 1;
-			}
-
-			wayland_thread.window_create(p_window_id, wd.rect.size, wd.parent_id, layer, _get_app_id_from_context(context));
+			wayland_thread.window_create(p_window_id, wd.rect.size, wd.parent_id, layer, _get_app_id_from_context(context), layer_screen);
 			wayland_thread.window_set_min_size(p_window_id, wd.min_size);
 			wayland_thread.window_set_max_size(p_window_id, wd.max_size);
 			wayland_thread.window_set_app_id(p_window_id, _get_app_id_from_context(context));
@@ -1139,8 +1155,11 @@ void DisplayServerWayland::window_set_drop_files_callback(const Callable &p_call
 
 int DisplayServerWayland::window_get_current_screen(DisplayServerEnums::WindowID p_window_id) const {
 	ERR_FAIL_COND_V(!windows.has(p_window_id), DisplayServerEnums::INVALID_SCREEN);
-	// Standard Wayland APIs don't support getting the screen of a window.
-	return 0;
+	// Wayland has no window positions, but the compositor says which outputs
+	// a surface is on (wl_surface.enter): the first of them, else 0.
+	MutexLock mutex_lock(wayland_thread.mutex);
+	int screen = wayland_thread.window_get_screen(p_window_id);
+	return screen >= 0 ? screen : 0;
 }
 
 void DisplayServerWayland::window_set_current_screen(int p_screen, DisplayServerEnums::WindowID p_window_id) {

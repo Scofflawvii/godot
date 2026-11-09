@@ -1312,7 +1312,7 @@ public:
 	void set_icon(const Ref<Image> &p_icon, DisplayServerEnums::WindowID p_window_id);
 	void set_default_icon(const Ref<Image> &p_icon);
 
-	void window_create(DisplayServerEnums::WindowID p_window_id, const Size2i &p_size, DisplayServerEnums::WindowID p_parent_id = DisplayServerEnums::INVALID_WINDOW_ID, int p_layer = -1, const String &p_layer_namespace = String());
+	void window_create(DisplayServerEnums::WindowID p_window_id, const Size2i &p_size, DisplayServerEnums::WindowID p_parent_id = DisplayServerEnums::INVALID_WINDOW_ID, int p_layer = -1, const String &p_layer_namespace = String(), int p_layer_screen = -1);
 	void window_create_popup(DisplayServerEnums::WindowID p_window_id, DisplayServerEnums::WindowID p_parent_id, Rect2i p_rect);
 	void window_destroy(DisplayServerEnums::WindowID p_window_Id);
 
@@ -1357,6 +1357,7 @@ public:
 
 	ScreenData screen_get_data(int p_screen) const;
 	int get_screen_count() const;
+	int window_get_screen(DisplayServerEnums::WindowID p_window_id) const;
 
 	bool input_has_touch() const;
 
